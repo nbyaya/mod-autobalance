@@ -552,6 +552,30 @@ bool ShouldMapBeEnabled(Map* map)
     }
 }
 
+//npcbot
+uint32 GetMapNonGMPlayersCountWithBots(Map const* map)
+{
+    uint32 count = 0;
+    bool limitBots = BotMgr::LimitBots(map);
+    for (MapReference const& ref : map->GetPlayers()) {
+        if (Player const* player = ref.GetSource()) {
+            ++count;
+            if (CountNpcBots && player->HaveBot()) {
+                BotMap const* botmap = player->GetBotMgr()->GetBotMap();
+                for (BotMap::const_iterator itr = botmap->begin(); itr != botmap->end(); ++itr) {
+                    Creature const* cre = itr->second;
+                    if (!cre || cre->IsTempBot() || (limitBots && (!cre->IsInWorld() || cre->FindMap() != map)))
+                        continue;
+                    ++count;
+                }
+            }
+        }
+    }
+
+    return count;
+}
+//end npcbot
+
 void LoadMapSettings(Map* map)
 {
     // Load (or create) the map's info
@@ -562,6 +586,11 @@ void LoadMapSettings(Map* map)
 
     // should the map be enabled at all?
     mapABInfo->enabled = ShouldMapBeEnabled(map);
+
+    //npcbot: DO NOT crash on BG map
+    if (!instanceMap)
+        return;
+    //end npcbot
 
     //
     // Dynamic Level Scaling Floor and Ceiling
@@ -1017,30 +1046,6 @@ float HealthModForRank(uint32 rank)
             return sWorld->getRate(RATE_CREATURE_ELITE_ELITE_HP);
     }
 }
-
-//npcbot
-uint32 GetMapNonGMPlayersCountWithBots(Map const* map)
-{
-    uint32 count = 0;
-    bool limitBots = BotMgr::LimitBots(map);
-    for (MapReference const& ref : map->GetPlayers()) {
-        if (Player const* player = ref.GetSource()) {
-            ++count;
-            if (CountNpcBots && player->HaveBot()) {
-                BotMap const* botmap = player->GetBotMgr()->GetBotMap();
-                for (BotMap::const_iterator itr = botmap->begin(); itr != botmap->end(); ++itr) {
-                    Creature const* cre = itr->second;
-                    if (!cre || cre->IsTempBot() || (limitBots && (!cre->IsInWorld() || cre->FindMap() != map)))
-                        continue;
-                    ++count;
-                }
-            }
-        }
-    }
-
-    return count;
-}
-//end npcbot
 
 class AutoBalance_WorldScript : public WorldScript
 {
