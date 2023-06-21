@@ -674,6 +674,12 @@ void AddCreatureToMapData(Creature* creature, bool addToCreatureList = true, Pla
 
     // get AutoBalance data
     InstanceMap* instanceMap = ((InstanceMap*)sMapMgr->FindMap(creature->GetMapId(), creature->GetInstanceId()));
+
+    //npcbot
+    if (!instanceMap)
+        return;
+    //end npcbot
+
     AutoBalanceMapInfo *mapABInfo=instanceMap->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
     AutoBalanceCreatureInfo *creatureABInfo=creature->CustomData.GetDefault<AutoBalanceCreatureInfo>("AutoBalanceCreatureInfo");
 
@@ -1878,6 +1884,11 @@ class AutoBalance_AllMapScript : public AllMapScript
                                 ChatHandler chatHandle = ChatHandler(playerHandle->GetSession());
                                 auto instanceMap = ((InstanceMap*)sMapMgr->FindMap(map->GetId(), map->GetInstanceId()));
 
+                                //npcbot
+                                if (!instanceMap)
+                                    break;
+                                //end npcbot
+
                                 std::string instanceDifficulty; if (instanceMap->IsHeroic()) instanceDifficulty = "Heroic"; else instanceDifficulty = "Normal";
 
                                 chatHandle.PSendSysMessage("|cffFF0000 [AutoBalance]|r|cffFF8000 %s enters %s (%u-player %s). Player count set to %u (Player Difficulty Offset = %u) |r",
@@ -2212,6 +2223,12 @@ public:
         CreatureTemplate const *creatureTemplate = creature->GetCreatureTemplate();
 
         InstanceMap* instanceMap = ((InstanceMap*)sMapMgr->FindMap(creature->GetMapId(), creature->GetInstanceId()));
+
+        //npcbot
+        if (!instanceMap)
+            return;
+        //end npcbot
+
         uint32 mapId = instanceMap->GetEntry()->MapID;
         if (perDungeonScalingEnabled() && !isEnabledDungeon(mapId))
         {
