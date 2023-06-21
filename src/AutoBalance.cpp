@@ -240,7 +240,9 @@ static uint32 rewardRaid, rewardDungeon, MinPlayerReward;
 static bool Announcement;
 static bool LevelScalingEndGameBoost, PlayerChangeNotify, rewardEnabled;
 static float MinHPModifier, MinManaModifier, MinDamageModifier, MinCCDurationModifier, MaxCCDurationModifier;
+//npcbot
 static bool CountNpcBots;
+//end npcbot
 
 // RewardScaling.*
 static ScalingMethod RewardScalingMethod;
@@ -969,7 +971,7 @@ void UpdateMapPlayerStats(Map* map)
     }
 
     // update the player count
-    mapABInfo->playerCount = map->GetPlayersCountExceptGMs();
+    mapABInfo->playerCount = GetMapNonGMPlayersCountWithBots(map);
 }
 
 void LoadForcedCreatureIdsFromString(std::string creatureIds, int forcedPlayerCount) // Used for reading the string from the configuration file to for those creatures who need to be scaled for XX number of players.
@@ -1140,6 +1142,7 @@ class AutoBalance_WorldScript : public WorldScript
         // TODO: Organize and standardize variable names
 
         PlayerChangeNotify = sConfigMgr->GetOption<bool>("AutoBalance.PlayerChangeNotify", 1);
+
         //npcbot
         CountNpcBots = sConfigMgr->GetOption<bool>("AutoBalance.CountNpcBots", true);
         //end npcbot
@@ -1645,6 +1648,11 @@ class AutoBalance_UnitScript : public UnitScript
         if (!attacker || attacker->GetTypeId() == TYPEID_PLAYER || !attacker->IsInWorld())
             return damage;
 
+        //npcbot
+        if (attacker->IsNPCBotOrPet())
+            return damage;
+        //end npcbot
+
         // make sure we're in an instance, else return the original damage
         if (
             !(
@@ -1697,6 +1705,11 @@ class AutoBalance_UnitScript : public UnitScript
         // if the target isn't a player or the caster is a player, return the original duration
         if (!target->IsPlayer() || caster->IsPlayer())
             return originalDuration;
+
+        //npcbot
+        if (caster->IsNPCBotOrPet())
+            return originalDuration;
+        //end npcbot
 
         // make sure we're in an instance, else return the original duration
         if (
@@ -1775,8 +1788,9 @@ class AutoBalance_AllMapScript : public AllMapScript
         void AfterBotsEnter(Map* map, Player const* player)
         {
             AutoBalanceMapInfo* mapABInfo = map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
-            mapABInfo->playerCount = GetMapNonGMPlayersCountWithBots(map);
-            if (PlayerChangeNotify) {
+            uint32 old_player_count = mapABInfo->playerCount;
+            UpdateMapPlayerStats(map);
+            if (PlayerChangeNotify && old_player_count != mapABInfo->playerCount) {
                 for (MapReference const& ref : map->GetPlayers()) {
                     if (Player const* playerHandle = ref.GetSource()) {
                         ChatHandler(playerHandle->GetSession()).PSendSysMessage("|cffFF0000 [AutoBalance+NPCBots]|r|cffFF8000 %s's bots entered %s. Auto setting player count to %i (Player Difficulty Offset = %i) |r", player->GetName().c_str(), map->GetMapName(), mapABInfo->playerCount + PlayerCountDifficultyOffset, PlayerCountDifficultyOffset);
@@ -1941,7 +1955,7 @@ class AutoBalance_AllMapScript : public AllMapScript
                 }
                 else
                 {
-                    mapABInfo->playerCount = GetMapNonGMPlayersCountWithBots(map); - 1;
+                    mapABInfo->playerCount = GetMapNonGMPlayersCountWithBots(map) - 1;
                 }
             }
 
@@ -1958,7 +1972,7 @@ class AutoBalance_AllMapScript : public AllMapScript
                             if (mapPlayer && mapPlayer != player)
                             {
                                 ChatHandler chatHandle = ChatHandler(mapPlayer->GetSession());
-                                chatHandle.PSendSysMessage("|cffFF0000 [AutoBalance]|r|cffFF8000 %s left %s. Auto setting player count to %i (Player Difficulty Offset = %i) |r", player->GetName().c_str(), map->GetMapName(), mapABInfo->playerCount, PlayerCountDifficultyOffset);
+                                chatHandle.PSendSysMessage("|cffFF0000 [AutoBalance]|r|cffFF8000 %s left %s. Auto setting player count to %i (Player Difficulty Offset = %i) |r", player->GetName().c_str(), map->GetMapName(), mapABInfo->playerCount + PlayerCountDifficultyOffset, PlayerCountDifficultyOffset);
                             }
                         }
                     }
@@ -2035,6 +2049,11 @@ public:
         // if this is a non-relevant creature, skip
         if (creature->IsCritter() || creature->IsTotem() || creature->IsTrigger())
             return false;
+
+        //npcbot
+        if (creature->IsNPCBotOrPet())
+            return false;
+        //end npcbot
 
         // get (or create) the creature and map's info
         AutoBalanceCreatureInfo *creatureABInfo=creature->CustomData.GetDefault<AutoBalanceCreatureInfo>("AutoBalanceCreatureInfo");
@@ -2194,10 +2213,12 @@ public:
             return;
         }
         uint32 maxNumberOfPlayers = instanceMap->GetMaxPlayers();
+
         //npcbot: number of players for world maps
         if (maxNumberOfPlayers == 0 && instanceMap->GetEntry()->IsWorldMap())
             maxNumberOfPlayers = MAXGROUPSIZE;
         //end npcbot
+
         int forcedNumPlayers = GetForcedNumPlayers(creatureTemplate->Entry);
 
         if (forcedNumPlayers > 0)
@@ -2269,9 +2290,10 @@ public:
         CreatureBaseStats const* origCreatureStats = sObjectMgr->GetCreatureBaseStats(creatureABInfo->UnmodifiedLevel, creatureTemplate->unit_class);
         CreatureBaseStats const* creatureStats = sObjectMgr->GetCreatureBaseStats(creatureABInfo->selectedLevel, creatureTemplate->unit_class);
 
+        //npcbot
         float hp_rate = HealthModForRank(creatureTemplate->rank);
+        //end npcbot
 
-        uint32 baseHealth = std::max<uint32>(1, origCreatureStats->GenerateHealth(creatureTemplate) * hp_rate);
         uint32 baseMana = origCreatureStats->GenerateMana(creatureTemplate);
         uint32 scaledHealth = 0;
         uint32 scaledMana = 0;
@@ -2752,6 +2774,10 @@ public:
         float hpStatsRate  = 1.0f;
         float originalHealth = origCreatureStats->GenerateHealth(creatureTemplate);
 
+        //npcbot
+        originalHealth *= hp_rate;
+        //end npcbot
+
         float newBaseHealth;
 
         // The database holds multiple values for base health, one for each expansion
@@ -2802,6 +2828,11 @@ public:
         }
 
         float newHealth =  newBaseHealth * creatureTemplate->ModHealth;
+
+        //npcbot
+        newHealth *= hp_rate;
+        //end npcbot
+
         hpStatsRate = newHealth / originalHealth;
 
         healthMultiplier *= hpStatsRate;
@@ -3233,6 +3264,7 @@ void AddAutoBalanceScripts()
     new AutoBalance_AllMapScript();
     new AutoBalance_CommandScript();
     new AutoBalance_GlobalScript();
+
     //npcbot
     new ABModuleNPCBots();
     //end npcbot
