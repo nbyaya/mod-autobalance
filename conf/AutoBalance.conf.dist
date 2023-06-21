@@ -12,6 +12,12 @@
 AutoBalance.Enable.Global=1
 
 #
+#     AutoBalance.CountNpcBots
+#        NPCBots mod integration. Makes bots count as players for player count calculation
+#        Default:     1 (1 = ON, 0 = OFF)
+AutoBalance.CountNpcBots=1
+
+#
 #     AutoBalance.Enabled.*
 #        Enable/Disable all features for each instance size and difficulty.
 #        If an instance size is set to 0 here, none of the other settings for that instance size will take effect.
@@ -835,13 +841,6 @@ AutoBalance.RewardScaling.Money.Modifier = 1.0
 # Messages
 #
 ##########################
-
-#
-#     AutoBalance.CountNpcBots
-#        NPCBots mod integration. Makes bots count as players for player count calculation
-#        Default:     1 (1 = ON, 0 = OFF)
-
-AutoBalance.CountNpcBots=1
 
 #
 #     AutoBalance.PlayerChangeNotify
