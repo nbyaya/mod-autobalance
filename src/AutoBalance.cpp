@@ -28,22 +28,13 @@
 * instance mobs & world bosses' level, health, mana, and damage.
 */
 
-#include "Configuration/Config.h"
-#include "Unit.h"
-#include "Chat.h"
-#include "Creature.h"
-#include "Player.h"
-#include "ObjectMgr.h"
-#include "MapMgr.h"
-#include "World.h"
-#include "Map.h"
-#include "ScriptMgr.h"
-#include "Language.h"
-#include <vector>
 #include "AutoBalance.h"
+#include "Chat.h"
+#include "Configuration/Config.h"
+#include "MapMgr.h"
+#include "ObjectMgr.h"
+#include "Player.h"
 #include "ScriptMgrMacros.h"
-#include "Group.h"
-#include "Log.h"
 #include <chrono>
 
 #if AC_COMPILER == AC_COMPILER_GNU
@@ -166,7 +157,7 @@ public:
     std::vector<Creature*> allMapCreatures;
     uint8 highestCreatureLevel = 0;
     uint8 lowestCreatureLevel = 0;
-    float avgCreatureLevel;
+    float avgCreatureLevel = 0.0f;
     uint32 activeCreatureCount = 0;
 
     bool isLevelScalingEnabled;
@@ -257,6 +248,7 @@ static bool EnableGlobal;
 static bool Enable5M, Enable10M, Enable15M, Enable20M, Enable25M, Enable40M;
 static bool Enable5MHeroic, Enable10MHeroic, Enable25MHeroic;
 static bool EnableOtherNormal, EnableOtherHeroic;
+static bool EnableWorld;
 
 // InflectionPoint*
 static float InflectionPoint, InflectionPointCurveFloor, InflectionPointCurveCeiling, InflectionPointBoss;
@@ -487,30 +479,49 @@ bool hasLevelScalingDistanceCheckOverride(uint32 dungeonId)
     return (levelScalingDistanceCheckOverrides.find(dungeonId) != levelScalingDistanceCheckOverrides.end());
 }
 
+//npcbot
+uint32 GetMapNonGMPlayersCountWithBots(Map const* map)
+{
+    uint32 count = 0;
+    bool limitBots = BotMgr::LimitBots(map);
+    for (MapReference const& ref : map->GetPlayers()) {
+        if (Player const* player = ref.GetSource()) {
+            ++count;
+            if (CountNpcBots && player->HaveBot()) {
+                BotMap const* botmap = player->GetBotMgr()->GetBotMap();
+                for (BotMap::const_iterator itr = botmap->begin(); itr != botmap->end(); ++itr) {
+                    Creature const* cre = itr->second;
+                    if (!cre || cre->IsTempBot() || (limitBots && cre->FindMap() != map))
+                        continue;
+                    ++count;
+                }
+            }
+        }
+    }
+    return count;
+}
+
+uint32 GetMapMaxPlayers(Map const* map)
+{
+    if (InstanceMap const* imap = map->ToInstanceMap())
+        return imap->GetMaxPlayers();
+    return MAXGROUPSIZE;
+}
+//end npcbot
+
 bool ShouldMapBeEnabled(Map* map)
 {
-    if (map->IsDungeon() || map->IsRaid())
+    if (map->IsDungeon())
     {
-        // get the current instance map
-        auto instanceMap = ((InstanceMap*)sMapMgr->FindMap(map->GetId(), map->GetInstanceId()));
-
-        // if there wasn't one, then we're not in an instance
-        if (!instanceMap)
-        {
-            return false;
-        }
-
         // get the max player count for the instance
-        auto maxPlayerCount = instanceMap->GetMaxPlayers();
+        auto maxPlayerCount = GetMapMaxPlayers(map);
 
         // if the player count is less than 1, then we're not in an instance
         if (maxPlayerCount < 1)
-        {
             return false;
-        }
 
         // use the configuration variables to determine if this instance type/size should have scaling enabled
-        if (instanceMap->IsHeroic())
+        if (map->IsHeroic())
         {
             switch (maxPlayerCount)
             {
@@ -545,6 +556,10 @@ bool ShouldMapBeEnabled(Map* map)
             }
         }
     }
+    else if (map->GetEntry()->IsWorldMap())
+    {
+        return EnableWorld;
+    }
     else
     {
         // we're not in a dungeon or a raid, we never scale
@@ -552,71 +567,49 @@ bool ShouldMapBeEnabled(Map* map)
     }
 }
 
-//npcbot
-uint32 GetMapNonGMPlayersCountWithBots(Map const* map)
-{
-    uint32 count = 0;
-    bool limitBots = BotMgr::LimitBots(map);
-    for (MapReference const& ref : map->GetPlayers()) {
-        if (Player const* player = ref.GetSource()) {
-            ++count;
-            if (CountNpcBots && player->HaveBot()) {
-                BotMap const* botmap = player->GetBotMgr()->GetBotMap();
-                for (BotMap::const_iterator itr = botmap->begin(); itr != botmap->end(); ++itr) {
-                    Creature const* cre = itr->second;
-                    if (!cre || cre->IsTempBot() || (limitBots && (!cre->IsInWorld() || cre->FindMap() != map)))
-                        continue;
-                    ++count;
-                }
-            }
-        }
-    }
-
-    return count;
-}
-//end npcbot
-
 void LoadMapSettings(Map* map)
 {
     // Load (or create) the map's info
     AutoBalanceMapInfo *mapABInfo=map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
 
-    // create an InstanceMap object
-    InstanceMap* instanceMap = map->ToInstanceMap();
-
     // should the map be enabled at all?
     mapABInfo->enabled = ShouldMapBeEnabled(map);
 
-    //npcbot: DO NOT crash on BG map
-    if (!instanceMap)
+    if (!mapABInfo->enabled)
         return;
-    //end npcbot
 
     //
     // Dynamic Level Scaling Floor and Ceiling
     //
 
+    uint32 maxPlayers = GetMapMaxPlayers(map);
+
     // 5-player normal dungeons
-    if (instanceMap->GetMaxPlayers() <= 5 && !instanceMap->IsHeroic())
+    if (map->GetEntry()->IsWorldMap())
+    {
+        mapABInfo->levelScalingDynamicCeiling = 0;
+        mapABInfo->levelScalingDynamicFloor = 5;
+    }
+    else
+    if (maxPlayers <= 5 && !map->IsHeroic())
     {
         mapABInfo->levelScalingDynamicCeiling = LevelScalingDynamicLevelCeilingDungeons;
         mapABInfo->levelScalingDynamicFloor = LevelScalingDynamicLevelFloorDungeons;
-
     }
     // 5-player heroic dungeons
-    else if (instanceMap->GetMaxPlayers() <= 5 && instanceMap->IsHeroic())
+    else if (maxPlayers <= 5 && map->IsHeroic())
     {
         mapABInfo->levelScalingDynamicCeiling = LevelScalingDynamicLevelCeilingHeroicDungeons;
         mapABInfo->levelScalingDynamicFloor = LevelScalingDynamicLevelFloorHeroicDungeons;
     }
     // Normal raids
-    else if (instanceMap->GetMaxPlayers() > 5 && !instanceMap->IsHeroic())
+    else if (maxPlayers > 5 && !map->IsHeroic())
     {
         mapABInfo->levelScalingDynamicCeiling = LevelScalingDynamicLevelCeilingRaids;
         mapABInfo->levelScalingDynamicFloor = LevelScalingDynamicLevelFloorRaids;
     }
     // Heroic raids
-    else if (instanceMap->GetMaxPlayers() > 5 && instanceMap->IsHeroic())
+    else if (maxPlayers > 5 && map->IsHeroic())
     {
         mapABInfo->levelScalingDynamicCeiling = LevelScalingDynamicLevelCeilingHeroicRaids;
         mapABInfo->levelScalingDynamicFloor = LevelScalingDynamicLevelFloorHeroicRaids;
@@ -624,7 +617,7 @@ void LoadMapSettings(Map* map)
     // something went wrong
     else
     {
-        LOG_ERROR("module.AutoBalance", "AutoBalance_AllCreatureScript::ModifyCreatureAttributes: Unable to determine dynamic scaling floor and ceiling for instance {}.", instanceMap->GetMapName());
+        LOG_ERROR("module.AutoBalance", "AutoBalance_AllCreatureScript::ModifyCreatureAttributes: Unable to determine dynamic scaling floor and ceiling for instance {}.", map->GetMapName());
         mapABInfo->levelScalingDynamicCeiling = 3;
         mapABInfo->levelScalingDynamicFloor = 5;
     }
@@ -665,22 +658,18 @@ void LoadMapSettings(Map* map)
 void AddCreatureToMapData(Creature* creature, bool addToCreatureList = true, Player* playerToExcludeFromChecks = nullptr, bool forceRecalculation = false)
 {
     // make sure we have a creature and that it's assigned to a map
-    if (!creature || !creature->GetMap())
-        return;
-
-    // if this isn't a dungeon or a battleground, skip
-    if (!(creature->GetMap()->IsDungeon() || creature->GetMap()->IsBattleground()))
+    if (!creature)
         return;
 
     // get AutoBalance data
-    InstanceMap* instanceMap = ((InstanceMap*)sMapMgr->FindMap(creature->GetMapId(), creature->GetInstanceId()));
+    Map* map = sMapMgr->FindMap(creature->GetMapId(), creature->GetInstanceId());
 
     //npcbot
-    if (!instanceMap)
+    if (!map)
         return;
     //end npcbot
 
-    AutoBalanceMapInfo *mapABInfo=instanceMap->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
+    AutoBalanceMapInfo *mapABInfo=map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
     AutoBalanceCreatureInfo *creatureABInfo=creature->CustomData.GetDefault<AutoBalanceCreatureInfo>("AutoBalanceCreatureInfo");
 
     // store the creature's original level if this is the first time seeing it
@@ -749,6 +738,11 @@ void AddCreatureToMapData(Creature* creature, bool addToCreatureList = true, Pla
         LOG_DEBUG("module.AutoBalance", "AutoBalance_AllCreature::AddCreatureToMapData(): {} ({}) is a critter, totem, or trigger - skip.", creature->GetName(), creatureABInfo->UnmodifiedLevel);
         return;
     }
+
+    //npcbot
+    if (creature->IsNPCBotOrPet())
+        return;
+    //end npcbot
 
     // if the creature level is below 85% of the minimum LFG level, assume it's a flavor creature and shouldn't be tracked or modified
     if (creatureABInfo->UnmodifiedLevel < ((float)mapABInfo->lfgMinLevel * .85f))
@@ -829,9 +823,9 @@ void AddCreatureToMapData(Creature* creature, bool addToCreatureList = true, Pla
                 }
 
                 // perform the distance check if an override is configured for this map
-                if (hasLevelScalingDistanceCheckOverride(instanceMap->GetId()))
+                if (hasLevelScalingDistanceCheckOverride(map->GetId()))
                 {
-                    uint32 distance = levelScalingDistanceCheckOverrides[instanceMap->GetId()];
+                    uint32 distance = levelScalingDistanceCheckOverrides[map->GetId()];
                     bool isPlayerWithinDistance = false;
 
                     for (Map::PlayerList::const_iterator playerIteration = playerList.begin(); playerIteration != playerList.end(); ++playerIteration)
@@ -876,7 +870,7 @@ void AddCreatureToMapData(Creature* creature, bool addToCreatureList = true, Pla
 
             // calculate the new average creature level
             float creatureCount = mapABInfo->activeCreatureCount;
-            float newAvgCreatureLevel = (((float)mapABInfo->avgCreatureLevel * creatureCount) + (float)creatureABInfo->UnmodifiedLevel) / (creatureCount + 1.0f);
+            float newAvgCreatureLevel = ((mapABInfo->avgCreatureLevel * creatureCount) + (float)creatureABInfo->UnmodifiedLevel) / (creatureCount + 1.0f);
             mapABInfo->avgCreatureLevel = newAvgCreatureLevel;
 
             // increment the active creature counter
@@ -943,6 +937,12 @@ void UpdateMapLevelIfNeeded(Map* map)
 
         // if LevelScaling is disabled OR if the average creature level is inside the skip range,
         // set the map level to the average creature level, rounded to the nearest integer
+        if (map->GetEntry()->IsWorldMap())
+        {
+            mapABInfo->mapLevel = mapABInfo->highestPlayerLevel;
+            mapABInfo->isLevelScalingEnabled = true;
+        }
+        else
         if (!LevelScaling ||
             ((mapABInfo->avgCreatureLevel <= mapABInfo->highestPlayerLevel + mapABInfo->levelScalingSkipHigherLevels && mapABInfo->levelScalingSkipHigherLevels != 0) &&
               (mapABInfo->avgCreatureLevel >= mapABInfo->highestPlayerLevel - mapABInfo->levelScalingSkipLowerLevels && mapABInfo->levelScalingSkipLowerLevels != 0))
@@ -1156,6 +1156,7 @@ class AutoBalance_WorldScript : public WorldScript
 
         //npcbot
         CountNpcBots = sConfigMgr->GetOption<bool>("AutoBalance.CountNpcBots", true);
+        EnableWorld = sConfigMgr->GetOption<bool>("AutoBalance.Enable.World", false);
         //end npcbot
 
         rewardEnabled = sConfigMgr->GetOption<bool>("AutoBalance.reward.enable", 1);
@@ -1504,7 +1505,7 @@ class AutoBalance_PlayerScript : public PlayerScript
 
             Map* map = player->GetMap();
 
-            if (!map || !map->IsDungeon())
+            if (!ShouldMapBeEnabled(map))
                 return;
 
             // first update the map's player stats
@@ -1516,87 +1517,78 @@ class AutoBalance_PlayerScript : public PlayerScript
 
         void OnGiveXP(Player* player, uint32& amount, Unit* victim, uint8 /*xpSource*/) override
         {
-            Map* map = player->GetMap();
-
-            // If this isn't a dungeon, make no changes
-            if (!map->IsDungeon() || !victim)
+            if (!victim || !RewardScalingXP)
                 return;
 
-            AutoBalanceMapInfo *mapABInfo=map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
+            Map* map = player->GetMap();
+            AutoBalanceMapInfo* mapABInfo = map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
 
-            if (victim && RewardScalingXP && mapABInfo->enabled)
+            if (!mapABInfo->enabled)
+                return;
+
+            AutoBalanceCreatureInfo *creatureABInfo=victim->CustomData.GetDefault<AutoBalanceCreatureInfo>("AutoBalanceCreatureInfo");
+            if (RewardScalingMethod == AUTOBALANCE_SCALING_DYNAMIC)
             {
-                Map* map = player->GetMap();
-
-                AutoBalanceCreatureInfo *creatureABInfo=victim->CustomData.GetDefault<AutoBalanceCreatureInfo>("AutoBalanceCreatureInfo");
-
-                if (map->IsDungeon())
-                {
-                    if (RewardScalingMethod == AUTOBALANCE_SCALING_DYNAMIC)
-                    {
-                        LOG_DEBUG("module.AutoBalance", "AutoBalance_PlayerScript::OnGiveXP(): Distributing XP from '{}' to '{}' in dynamic mode - {}->{}",
-                                 victim->GetName(), player->GetName(), amount, uint32(amount * creatureABInfo->XPModifier));
-                        amount = uint32(amount * creatureABInfo->XPModifier);
-                    }
-                    else if (RewardScalingMethod == AUTOBALANCE_SCALING_FIXED)
-                    {
-                        // Ensure that the players always get the same XP, even when entering the dungeon alone
-                        auto maxPlayerCount = ((InstanceMap*)sMapMgr->FindMap(map->GetId(), map->GetInstanceId()))->GetMaxPlayers();
-                    	auto currentPlayerCount = GetMapNonGMPlayersCountWithBots(map);
-                        LOG_DEBUG("module.AutoBalance", "AutoBalance_PlayerScript::OnGiveXP(): Distributing XP from '{}' to '{}' in fixed mode - {}->{}",
-                                 victim->GetName(), player->GetName(), amount, uint32(amount * creatureABInfo->XPModifier * ((float)currentPlayerCount / maxPlayerCount)));
-                        amount = uint32(amount * creatureABInfo->XPModifier * ((float)currentPlayerCount / maxPlayerCount));
-                    }
-                }
+                LOG_DEBUG("module.AutoBalance", "AutoBalance_PlayerScript::OnGiveXP(): Distributing XP from '{}' to '{}' in dynamic mode - {}->{}",
+                            victim->GetName(), player->GetName(), amount, uint32(amount * creatureABInfo->XPModifier));
+                amount = uint32(amount * creatureABInfo->XPModifier);
+            }
+            else if (RewardScalingMethod == AUTOBALANCE_SCALING_FIXED)
+            {
+                // Ensure that the players always get the same XP, even when entering the dungeon alone
+                auto maxPlayerCount = GetMapMaxPlayers(map);
+                auto currentPlayerCount = GetMapNonGMPlayersCountWithBots(map);
+                LOG_DEBUG("module.AutoBalance", "AutoBalance_PlayerScript::OnGiveXP(): Distributing XP from '{}' to '{}' in fixed mode - {}->{}",
+                            victim->GetName(), player->GetName(), amount, uint32(amount * creatureABInfo->XPModifier * ((float)currentPlayerCount / maxPlayerCount)));
+                amount = uint32(amount * creatureABInfo->XPModifier * ((float)currentPlayerCount / maxPlayerCount));
             }
         }
 
         void OnBeforeLootMoney(Player* player, Loot* loot) override
         {
-            Map* map = player->GetMap();
-
-            // If this isn't a dungeon, make no changes
-            if (!map->IsDungeon())
+            if (!RewardScalingMoney)
                 return;
 
-            AutoBalanceMapInfo *mapABInfo=map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
+            Map* map = player->GetMap();
+            AutoBalanceMapInfo* mapABInfo = map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
+
+            if (!mapABInfo->enabled)
+                return;
+
             ObjectGuid sourceGuid = loot->sourceWorldObjectGUID;
 
-            if (mapABInfo->enabled && RewardScalingMoney)
+            // if the loot source is a creature, honor the modifiers for that creature
+            if (sourceGuid.IsCreature())
             {
-                // if the loot source is a creature, honor the modifiers for that creature
-                if (sourceGuid.IsCreature())
-                {
-                    Creature* sourceCreature = ObjectAccessor::GetCreature(*player, sourceGuid);
-                    AutoBalanceCreatureInfo *creatureABInfo=sourceCreature->CustomData.GetDefault<AutoBalanceCreatureInfo>("AutoBalanceCreatureInfo");
+                Creature* sourceCreature = ObjectAccessor::GetCreature(*player, sourceGuid);
+                AutoBalanceCreatureInfo* creatureABInfo = sourceCreature->CustomData.GetDefault<AutoBalanceCreatureInfo>("AutoBalanceCreatureInfo");
 
-                    // Dynamic Mode
-                    if (RewardScalingMethod == AUTOBALANCE_SCALING_DYNAMIC)
-                    {
-                        LOG_DEBUG("module.AutoBalance", "AutoBalance_PlayerScript::OnBeforeLootMoney(): Distributing money from '{}' in dynamic mode - {}->{}",
-                                 sourceCreature->GetName(), loot->gold, uint32(loot->gold * creatureABInfo->MoneyModifier));
-                        loot->gold = uint32(loot->gold * creatureABInfo->MoneyModifier);
-                    }
-                    // Fixed Mode
-                    else if (RewardScalingMethod == AUTOBALANCE_SCALING_FIXED)
-                    {
-                        // Ensure that the players always get the same money, even when entering the dungeon alone
-                        auto maxPlayerCount = ((InstanceMap*)sMapMgr->FindMap(map->GetId(), map->GetInstanceId()))->GetMaxPlayers();
-                        auto currentPlayerCount = map->GetPlayersCountExceptGMs();
-                        LOG_DEBUG("module.AutoBalance", "AutoBalance_PlayerScript::OnBeforeLootMoney(): Distributing money from '{}' in fixed mode - {}->{}",
-                                 sourceCreature->GetName(), loot->gold, uint32(loot->gold * creatureABInfo->MoneyModifier * ((float)currentPlayerCount / maxPlayerCount)));
-                        loot->gold = uint32(loot->gold * creatureABInfo->MoneyModifier * ((float)currentPlayerCount / maxPlayerCount));
-                    }
-                }
-                // for all other loot sources, just distribute in Fixed mode as though the instance was full
-                else
+                // Dynamic Mode
+                if (RewardScalingMethod == AUTOBALANCE_SCALING_DYNAMIC)
                 {
-                    auto maxPlayerCount = ((InstanceMap*)sMapMgr->FindMap(map->GetId(), map->GetInstanceId()))->GetMaxPlayers();
-                    auto currentPlayerCount = GetMapNonGMPlayersCountWithBots(map);
-                    LOG_DEBUG("module.AutoBalance", "AutoBalance_PlayerScript::OnBeforeLootMoney(): Distributing money from a non-creature in fixed mode - {}->{}",
-                             loot->gold, uint32(loot->gold * ((float)currentPlayerCount / maxPlayerCount)));
-                    loot->gold = uint32(loot->gold * ((float)currentPlayerCount / maxPlayerCount));
+                    LOG_DEBUG("module.AutoBalance", "AutoBalance_PlayerScript::OnBeforeLootMoney(): Distributing money from '{}' in dynamic mode - {}->{}",
+                                sourceCreature->GetName(), loot->gold, uint32(loot->gold * creatureABInfo->MoneyModifier));
+                    loot->gold = uint32(loot->gold * creatureABInfo->MoneyModifier);
                 }
+                // Fixed Mode
+                else if (RewardScalingMethod == AUTOBALANCE_SCALING_FIXED)
+                {
+                    // Ensure that the players always get the same money, even when entering the dungeon alone
+                    auto maxPlayerCount = GetMapMaxPlayers(map);
+                    auto currentPlayerCount = map->GetPlayersCountExceptGMs();
+                    LOG_DEBUG("module.AutoBalance", "AutoBalance_PlayerScript::OnBeforeLootMoney(): Distributing money from '{}' in fixed mode - {}->{}",
+                                sourceCreature->GetName(), loot->gold, uint32(loot->gold * creatureABInfo->MoneyModifier * ((float)currentPlayerCount / maxPlayerCount)));
+                    loot->gold = uint32(loot->gold * creatureABInfo->MoneyModifier * ((float)currentPlayerCount / maxPlayerCount));
+                }
+            }
+            // for all other loot sources, just distribute in Fixed mode as though the instance was full
+            else
+            {
+                auto maxPlayerCount = GetMapMaxPlayers(map);
+                auto currentPlayerCount = GetMapNonGMPlayersCountWithBots(map);
+                LOG_DEBUG("module.AutoBalance", "AutoBalance_PlayerScript::OnBeforeLootMoney(): Distributing money from a non-creature in fixed mode - {}->{}",
+                            loot->gold, uint32(loot->gold * ((float)currentPlayerCount / maxPlayerCount)));
+                loot->gold = uint32(loot->gold * ((float)currentPlayerCount / maxPlayerCount));
             }
         }
 };
@@ -1649,14 +1641,18 @@ class AutoBalance_UnitScript : public UnitScript
         }
     }
 
-    uint32 _Modifer_DealDamage(Unit* target, Unit* attacker, uint32 damage)
+    uint32 _Modifer_DealDamage(Unit* target, Unit* attacker, uint32 damage) const
     {
         // check that we're enabled globally, else return the original damage
         if (!EnableGlobal)
             return damage;
 
         // make sure we have an attacker, that its not a player, and that the attacker is in the world, else return the original damage
-        if (!attacker || attacker->GetTypeId() == TYPEID_PLAYER || !attacker->IsInWorld())
+        if (!attacker || attacker->GetTypeId() == TYPEID_PLAYER || !attacker->FindMap())
+            return damage;
+
+        // if the attacker is under the control of the player, return the original damage
+        if ((attacker->IsHunterPet() || attacker->IsPet() || attacker->IsSummon()) && attacker->IsControlledByPlayer())
             return damage;
 
         //npcbot
@@ -1665,12 +1661,7 @@ class AutoBalance_UnitScript : public UnitScript
         //end npcbot
 
         // make sure we're in an instance, else return the original damage
-        if (
-            !(
-                (target->GetMap()->IsDungeon() && attacker->GetMap()->IsDungeon()) ||
-                (target->GetMap()->IsBattleground() && attacker->GetMap()->IsBattleground())
-            )
-           )
+        if (!ShouldMapBeEnabled(target->GetMap()) || !ShouldMapBeEnabled(attacker->GetMap()))
             return damage;
 
         // get the map's info to see if we're enabled
@@ -1686,10 +1677,6 @@ class AutoBalance_UnitScript : public UnitScript
 
         // if it's the default of 1.0, return the original damage
         if (damageMultiplier == 1)
-            return damage;
-
-        // if the attacker is under the control of the player, return the original damage
-        if ((attacker->IsHunterPet() || attacker->IsPet() || attacker->IsSummon()) && attacker->IsControlledByPlayer())
             return damage;
 
         // we are good to go, return the original damage times the multiplier
@@ -1723,12 +1710,7 @@ class AutoBalance_UnitScript : public UnitScript
         //end npcbot
 
         // make sure we're in an instance, else return the original duration
-        if (
-            !(
-                (target->GetMap()->IsDungeon() && caster->GetMap()->IsDungeon()) ||
-                (target->GetMap()->IsBattleground() && caster->GetMap()->IsBattleground())
-            )
-           )
+        if (!ShouldMapBeEnabled(target->GetMap()) || !ShouldMapBeEnabled(caster->GetMap()))
             return originalDuration;
 
         // get the current creature's CC duration multiplier
@@ -1790,211 +1772,189 @@ class AutoBalance_AllMapScript : public AllMapScript
     //end npcbot
 
     public:
-    AutoBalance_AllMapScript()
-        : AllMapScript("AutoBalance_AllMapScript")
-        {
-        }
+    AutoBalance_AllMapScript() : AllMapScript("AutoBalance_AllMapScript") { }
 
-        //npcbot
-        void AfterBotsEnter(Map* map, Player const* player)
-        {
-            AutoBalanceMapInfo* mapABInfo = map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
-            uint32 old_player_count = mapABInfo->playerCount;
-            UpdateMapPlayerStats(map);
-            if (PlayerChangeNotify && old_player_count != mapABInfo->playerCount) {
-                for (MapReference const& ref : map->GetPlayers()) {
-                    if (Player const* playerHandle = ref.GetSource()) {
-                        ChatHandler(playerHandle->GetSession()).PSendSysMessage("|cffFF0000 [AutoBalance+NPCBots]|r|cffFF8000 %s's bots entered %s. Auto setting player count to %i (Player Difficulty Offset = %i) |r", player->GetName().c_str(), map->GetMapName(), mapABInfo->playerCount + PlayerCountDifficultyOffset, PlayerCountDifficultyOffset);
-                    }
+    //npcbot
+    void AfterBotsEnter(Map* map, Player const* player)
+    {
+        AutoBalanceMapInfo* mapABInfo = map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
+        uint32 old_player_count = mapABInfo->playerCount;
+        UpdateMapPlayerStats(map);
+        lastConfigTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        if (mapABInfo->enabled && PlayerChangeNotify && EnableGlobal && old_player_count != mapABInfo->playerCount) {
+            for (MapReference const& ref : map->GetPlayers()) {
+                if (Player const* playerHandle = ref.GetSource()) {
+                    ChatHandler(playerHandle->GetSession()).PSendSysMessage("|cffFF0000 [AutoBalance+NPCBots]|r|cffFF8000 %s's bots entered %s. Auto setting player count to %i (Player Difficulty Offset = %i) |r", player->GetName().c_str(), map->GetMapName(), mapABInfo->playerCount + PlayerCountDifficultyOffset, PlayerCountDifficultyOffset);
                 }
             }
         }
+    }
+    //end npcbot
+
+    void OnCreateMap(Map* map)
+    {
+        LOG_DEBUG("module.AutoBalance", "AutoBalance_AllMapScript::OnCreateMap(): {}", map->GetMapName());
+
+        if (!ShouldMapBeEnabled(map))
+            return;
+
+        // get the map's info
+        AutoBalanceMapInfo *mapABInfo=map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
+
+        // get the map's LFG stats
+        LFGDungeonEntry const* dungeon = map->GetEntry()->IsWorldMap() ? nullptr : GetLFGDungeon(map->GetId(), map->GetDifficulty());
+        if (dungeon) {
+            mapABInfo->lfgMinLevel = dungeon->MinLevel;
+            mapABInfo->lfgMaxLevel = dungeon->MaxLevel;
+            mapABInfo->lfgTargetLevel = dungeon->TargetLevel;
+        }
+
+        // load the map's settings
+        LoadMapSettings(map);
+    }
+
+    void OnPlayerEnterAll(Map* map, Player* player)
+    {
+        LOG_DEBUG("module.AutoBalance", "AutoBalance_AllMapScript::OnPlayerEnterAll(): {}", map->GetMapName());
+
+        if (!ShouldMapBeEnabled(map))
+            return;
+
+        if (player->IsGameMaster())
+            return;
+
+        // get the map's info
+        AutoBalanceMapInfo* mapABInfo = map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
+
+        // recalculate the zone's level stats
+        mapABInfo->highestCreatureLevel = 0;
+        mapABInfo->lowestCreatureLevel = 0;
+        mapABInfo->avgCreatureLevel = 0.0f;
+        mapABInfo->activeCreatureCount = 0;
+
+        // see which existing creatures are active
+        for (std::vector<Creature*>::iterator creatureIterator = mapABInfo->allMapCreatures.begin(); creatureIterator != mapABInfo->allMapCreatures.end(); ++creatureIterator)
+        {
+            AddCreatureToMapData(*creatureIterator, false, nullptr, true);
+        }
+
+        // determine if the map should be enabled for scaling based on the current settings
+        mapABInfo->playerCount = GetMapNonGMPlayersCountWithBots(map);
+        mapABInfo->enabled = ShouldMapBeEnabled(map);
+
+        // updates the player count, player levels for the map
+        UpdateMapPlayerStats(map);
+
+        //npcbot: recalculate players count once all bots are teleported
+        //event will be automatically deleted if player teleports out of the map before execution
+        //max teleport delay for bot is 8000ms
+        player->m_Events.AddEvent(new PlayersCountRecheckEvent(this, map, player), player->m_Events.CalculateTime(8500));
         //end npcbot
 
-        void OnCreateMap(Map* map)
+        if (PlayerChangeNotify && EnableGlobal && mapABInfo->enabled)
         {
-            LOG_DEBUG("module.AutoBalance", "AutoBalance_AllMapScript::OnCreateMap(): {}", map->GetMapName());
-
-            if (!map->IsDungeon() && !map->IsBattleground())
-                return;
-
-            // get the map's info
-            AutoBalanceMapInfo *mapABInfo=map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
-
-            // get the map's LFG stats
-            LFGDungeonEntry const* dungeon = GetLFGDungeon(map->GetId(), map->GetDifficulty());
-            if (dungeon) {
-                mapABInfo->lfgMinLevel = dungeon->MinLevel;
-                mapABInfo->lfgMaxLevel = dungeon->MaxLevel;
-                mapABInfo->lfgTargetLevel = dungeon->TargetLevel;
-            }
-
-            // load the map's settings
-            LoadMapSettings(map);
-        }
-
-        void OnPlayerEnterAll(Map* map, Player* player)
-        {
-            LOG_DEBUG("module.AutoBalance", "AutoBalance_AllMapScript::OnPlayerEnterAll(): {}", map->GetMapName());
-            if (!map->IsDungeon() && !map->IsBattleground())
-                return;
-
-            if (player->IsGameMaster())
-                return;
-
-            // get the map's info
-            AutoBalanceMapInfo *mapABInfo=map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
-
-            // recalculate the zone's level stats
-            mapABInfo->highestCreatureLevel = 0;
-            mapABInfo->lowestCreatureLevel = 0;
-            mapABInfo->avgCreatureLevel = 0;
-            mapABInfo->activeCreatureCount = 0;
-
-            // see which existing creatures are active
-            for (std::vector<Creature*>::iterator creatureIterator = mapABInfo->allMapCreatures.begin(); creatureIterator != mapABInfo->allMapCreatures.end(); ++creatureIterator)
+            Map::PlayerList const &playerList = map->GetPlayers();
+            for (Map::PlayerList::const_iterator playerIteration = playerList.begin(); playerIteration != playerList.end(); ++playerIteration)
             {
-                AddCreatureToMapData(*creatureIterator, false, nullptr, true);
-            }
-
-            // determine if the map should be enabled for scaling based on the current settings
-            mapABInfo->playerCount = GetMapNonGMPlayersCountWithBots(map);
-            mapABInfo->enabled = ShouldMapBeEnabled(map);
-
-            // updates the player count, player levels for the map
-            UpdateMapPlayerStats(map);
-
-            //npcbot: recalculate players count once all bots are teleported
-            //event will be automatically deleted if player teleports out of the map before execution
-            //max teleport delay for bot is 8000ms
-            player->m_Events.AddEvent(new PlayersCountRecheckEvent(this, map, player), player->m_Events.CalculateTime(8500));
-            //end npcbot
-
-            if (PlayerChangeNotify && EnableGlobal && mapABInfo->enabled)
-            {
-                if (player)
+                if (Player* playerHandle = playerIteration->GetSource())
                 {
-                    Map::PlayerList const &playerList = map->GetPlayers();
-                    if (!playerList.IsEmpty())
-                    {
-                        for (Map::PlayerList::const_iterator playerIteration = playerList.begin(); playerIteration != playerList.end(); ++playerIteration)
-                        {
-                            if (Player* playerHandle = playerIteration->GetSource())
-                            {
-                                ChatHandler chatHandle = ChatHandler(playerHandle->GetSession());
-                                auto instanceMap = ((InstanceMap*)sMapMgr->FindMap(map->GetId(), map->GetInstanceId()));
-
-                                //npcbot
-                                if (!instanceMap)
-                                    break;
-                                //end npcbot
-
-                                std::string instanceDifficulty; if (instanceMap->IsHeroic()) instanceDifficulty = "Heroic"; else instanceDifficulty = "Normal";
-
-                                chatHandle.PSendSysMessage("|cffFF0000 [AutoBalance]|r|cffFF8000 %s enters %s (%u-player %s). Player count set to %u (Player Difficulty Offset = %u) |r",
-                                    player->GetName().c_str(),
-                                    map->GetMapName(),
-                                    instanceMap->GetMaxPlayers(),
-                                    instanceDifficulty,
-                                    mapABInfo->playerCount + PlayerCountDifficultyOffset,
-                                    PlayerCountDifficultyOffset
-                                );
-                            }
-                        }
-                    }
+                    ChatHandler chatHandle = ChatHandler(playerHandle->GetSession());
+                    chatHandle.PSendSysMessage("|cffFF0000 [AutoBalance]|r|cffFF8000 %s enters %s (%u-player %s). Player count set to %u (Player Difficulty Offset = %u) |r",
+                        player->GetName().c_str(),
+                        map->GetMapName(),
+                        GetMapMaxPlayers(map),
+                            map->IsHeroic() ? "Heroic" : "Normal",
+                        mapABInfo->playerCount + PlayerCountDifficultyOffset,
+                        PlayerCountDifficultyOffset
+                    );
                 }
             }
         }
+    }
 
-        void OnPlayerLeaveAll(Map* map, Player* player)
+    void OnPlayerLeaveAll(Map* map, Player* player)
+    {
+        LOG_DEBUG("module.AutoBalance", "AutoBalance_AllMapScript::OnPlayerLeaveAll(): {}", map->GetMapName());
+        if (!EnableGlobal)
+            return;
+
+        // get the map's info
+        AutoBalanceMapInfo *mapABInfo=map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
+
+        // recalculate the zone's level stats
+        mapABInfo->highestCreatureLevel = 0;
+        mapABInfo->lowestCreatureLevel = 0;
+        mapABInfo->avgCreatureLevel = 0.0f;
+        mapABInfo->activeCreatureCount = 0;
+
+        // see which existing creatures are active
+        for (std::vector<Creature*>::iterator creatureIterator = mapABInfo->allMapCreatures.begin(); creatureIterator != mapABInfo->allMapCreatures.end(); ++creatureIterator)
         {
-            LOG_DEBUG("module.AutoBalance", "AutoBalance_AllMapScript::OnPlayerLeaveAll(): {}", map->GetMapName());
-            if (!EnableGlobal)
-                return;
+            AddCreatureToMapData(*creatureIterator, false, player, true);
+        }
 
-            // get the map's info
-            AutoBalanceMapInfo *mapABInfo=map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
+        // determine if the map should be enabled for scaling based on the current settings
+        mapABInfo->enabled = ShouldMapBeEnabled(map);
 
-            // recalculate the zone's level stats
-            mapABInfo->highestCreatureLevel = 0;
-            mapABInfo->lowestCreatureLevel = 0;
-            mapABInfo->avgCreatureLevel = 0;
-            mapABInfo->activeCreatureCount = 0;
+        bool areAnyPlayersInCombat = false;
 
-            // see which existing creatures are active
-            for (std::vector<Creature*>::iterator creatureIterator = mapABInfo->allMapCreatures.begin(); creatureIterator != mapABInfo->allMapCreatures.end(); ++creatureIterator)
+        // updates the player count and levels for the map
+        if (mapABInfo->enabled)
+        {
+            // determine if any players in the map are in combat
+            // if so, do not adjust the player count
+            Map::PlayerList const& mapPlayerList = map->GetPlayers();
+            for (Map::PlayerList::const_iterator itr = mapPlayerList.begin(); itr != mapPlayerList.end(); ++itr)
             {
-                AddCreatureToMapData(*creatureIterator, false, player, true);
+                if (Player* mapPlayer = itr->GetSource())
+                {
+                    if (mapPlayer->IsInCombat() && mapPlayer->GetMap() == map)
+                    {
+                        areAnyPlayersInCombat = true;
+
+                        // notify the player that they left the instance while combat was in progress
+                        ChatHandler chatHandle = ChatHandler(player->GetSession());
+                        chatHandle.PSendSysMessage("|cffFF0000 [AutoBalance]|r|cffFF8000 You left the instance while combat was in progress. The instance player count is still %u.", mapABInfo->playerCount);
+
+                        break;
+                    }
+                }
             }
-
-            // determine if the map should be enabled for scaling based on the current settings
-            mapABInfo->enabled = ShouldMapBeEnabled(map);
-
-            bool areAnyPlayersInCombat = false;
-
-            // updates the player count and levels for the map
-            if (map->GetEntry() && map->GetEntry()->IsDungeon())
+            if (areAnyPlayersInCombat)
             {
-                // determine if any players in the map are in combat
-                // if so, do not adjust the player count
-                Map::PlayerList const& mapPlayerList = map->GetPlayers();
                 for (Map::PlayerList::const_iterator itr = mapPlayerList.begin(); itr != mapPlayerList.end(); ++itr)
                 {
                     if (Player* mapPlayer = itr->GetSource())
                     {
-                        if (mapPlayer->IsInCombat() && mapPlayer->GetMap() == map)
+                        // only for the players who are in the instance and did not leave
+                        if (mapPlayer != player)
                         {
-                            areAnyPlayersInCombat = true;
-
-                            // notify the player that they left the instance while combat was in progress
-                            ChatHandler chatHandle = ChatHandler(player->GetSession());
-                            chatHandle.PSendSysMessage("|cffFF0000 [AutoBalance]|r|cffFF8000 You left the instance while combat was in progress. The instance player count is still %u.", mapABInfo->playerCount);
-
-                            break;
+                            ChatHandler chatHandle = ChatHandler(mapPlayer->GetSession());
+                            chatHandle.PSendSysMessage("|cffFF0000 [AutoBalance]|r|cffFF8000 %s left the instance while combat was in progress. The instance player count is still %u.", player->GetName().c_str(), mapABInfo->playerCount);
                         }
                     }
-                }
-                if (areAnyPlayersInCombat)
-                {
-                    for (Map::PlayerList::const_iterator itr = mapPlayerList.begin(); itr != mapPlayerList.end(); ++itr)
-                    {
-                        if (Player* mapPlayer = itr->GetSource())
-                        {
-                            // only for the players who are in the instance and did not leave
-                            if (mapPlayer != player)
-                            {
-                                ChatHandler chatHandle = ChatHandler(mapPlayer->GetSession());
-                                chatHandle.PSendSysMessage("|cffFF0000 [AutoBalance]|r|cffFF8000 %s left the instance while combat was in progress. The instance player count is still %u.", player->GetName().c_str(), mapABInfo->playerCount);
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    mapABInfo->playerCount = GetMapNonGMPlayersCountWithBots(map) - 1;
                 }
             }
-
-            if (PlayerChangeNotify && !player->IsGameMaster() && !areAnyPlayersInCombat && EnableGlobal && mapABInfo->enabled)
+            else
             {
-                if (player)
+                mapABInfo->playerCount = GetMapNonGMPlayersCountWithBots(map) - 1;
+            }
+        }
+
+        if (PlayerChangeNotify && !player->IsGameMaster() && !areAnyPlayersInCombat && EnableGlobal && mapABInfo->enabled)
+        {
+            Map::PlayerList const &playerList = map->GetPlayers();
+            for (Map::PlayerList::const_iterator playerIteration = playerList.begin(); playerIteration != playerList.end(); ++playerIteration)
+            {
+                Player* mapPlayer = playerIteration->GetSource();
+                if (mapPlayer && mapPlayer != player)
                 {
-                    Map::PlayerList const &playerList = map->GetPlayers();
-                    if (!playerList.IsEmpty())
-                    {
-                        for (Map::PlayerList::const_iterator playerIteration = playerList.begin(); playerIteration != playerList.end(); ++playerIteration)
-                        {
-                            Player* mapPlayer = playerIteration->GetSource();
-                            if (mapPlayer && mapPlayer != player)
-                            {
-                                ChatHandler chatHandle = ChatHandler(mapPlayer->GetSession());
-                                chatHandle.PSendSysMessage("|cffFF0000 [AutoBalance]|r|cffFF8000 %s left %s. Auto setting player count to %i (Player Difficulty Offset = %i) |r", player->GetName().c_str(), map->GetMapName(), mapABInfo->playerCount + PlayerCountDifficultyOffset, PlayerCountDifficultyOffset);
-                            }
-                        }
-                    }
+                    ChatHandler chatHandle = ChatHandler(mapPlayer->GetSession());
+                    chatHandle.PSendSysMessage("|cffFF0000 [AutoBalance]|r|cffFF8000 %s left %s. Auto setting player count to %i (Player Difficulty Offset = %i) |r", player->GetName().c_str(), map->GetMapName(), mapABInfo->playerCount + PlayerCountDifficultyOffset, PlayerCountDifficultyOffset);
                 }
             }
         }
+    }
 };
 
 class AutoBalance_AllCreatureScript : public AllCreatureScript
@@ -2007,7 +1967,7 @@ public:
 
     void Creature_SelectLevel(const CreatureTemplate* /*creatureTemplate*/, Creature* creature) override
     {
-        if (creature->GetMap()->IsDungeon())
+        if (ShouldMapBeEnabled(creature->GetMap()))
             LOG_DEBUG("module.AutoBalance", "AutoBalance_AllCreatureScript::Creature_SelectLevel(): {} ({})", creature->GetName(), creature->GetLevel());
 
         // add the creature to the map's tracking list
@@ -2020,13 +1980,13 @@ public:
 
     void OnCreatureAddWorld(Creature* creature) override
     {
-        if (creature->GetMap()->IsDungeon())
+        if (ShouldMapBeEnabled(creature->GetMap()))
             LOG_DEBUG("module.AutoBalance", "AutoBalance_AllCreatureScript::OnCreatureAddWorld(): {} ({})", creature->GetName(), creature->GetLevel());
     }
 
     void OnCreatureRemoveWorld(Creature* creature) override
     {
-        if (creature->GetMap()->IsDungeon())
+        if (ShouldMapBeEnabled(creature->GetMap()))
             LOG_DEBUG("module.AutoBalance", "AutoBalance_AllCreatureScript::OnCreatureRemoveWorld(): {} ({})", creature->GetName(), creature->GetLevel());
 
         // remove the creature from the map's tracking list, if present
@@ -2048,14 +2008,13 @@ public:
     }
 
     // Reset the passed creature to stock if the config has changed
-    bool ResetCreatureIfNeeded(Creature* creature)
+    bool ResetCreatureIfNeeded(Creature* creature) const
     {
         // make sure we have a creature and that it's assigned to a map
-        if (!creature || !creature->GetMap())
+        if (!creature || !creature->FindMap())
             return false;
 
-        // if this isn't a dungeon or a battleground, make no changes
-        if (!(creature->GetMap()->IsDungeon() || creature->GetMap()->IsBattleground()))
+        if (!ShouldMapBeEnabled(creature->GetMap()))
             return false;
 
         // if this is a pet or summon controlled by the player, make no changes
@@ -2171,11 +2130,10 @@ public:
     void ModifyCreatureAttributes(Creature* creature)
     {
         // make sure we have a creature and that it's assigned to a map
-        if (!creature || !creature->GetMap())
+        if (!creature || !creature->FindMap())
             return;
 
-        // if this isn't a dungeon or a battleground, make no changes
-        if (!(creature->GetMap()->IsDungeon() || creature->GetMap()->IsBattleground()))
+        if (!ShouldMapBeEnabled(creature->GetMap()))
             return;
 
         // if this is a pet or summon controlled by the player, make no changes
@@ -2186,9 +2144,11 @@ public:
         if (creature->IsCritter() || creature->IsTotem() || creature->IsTrigger())
             return;
 
+        Map* map = creature->GetMap();
+
         // grab creature and map data
         AutoBalanceCreatureInfo *creatureABInfo=creature->CustomData.GetDefault<AutoBalanceCreatureInfo>("AutoBalanceCreatureInfo");
-        AutoBalanceMapInfo *mapABInfo=creature->GetMap()->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
+        AutoBalanceMapInfo *mapABInfo=map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
 
         // mark the creature as updated using the current settings if needed
         if (creatureABInfo->configTime != lastConfigTime)
@@ -2222,22 +2182,15 @@ public:
 
         CreatureTemplate const *creatureTemplate = creature->GetCreatureTemplate();
 
-        InstanceMap* instanceMap = ((InstanceMap*)sMapMgr->FindMap(creature->GetMapId(), creature->GetInstanceId()));
-
-        //npcbot
-        if (!instanceMap)
-            return;
-        //end npcbot
-
-        uint32 mapId = instanceMap->GetEntry()->MapID;
-        if (perDungeonScalingEnabled() && !isEnabledDungeon(mapId))
+        uint32 mapId = map->GetId();
+        if (perDungeonScalingEnabled() && map->GetEntry()->Instanceable() && !isEnabledDungeon(mapId))
         {
             return;
         }
-        uint32 maxNumberOfPlayers = instanceMap->GetMaxPlayers();
+        uint32 maxNumberOfPlayers = GetMapMaxPlayers(map);
 
         //npcbot: number of players for world maps
-        if (maxNumberOfPlayers == 0 && instanceMap->GetEntry()->IsWorldMap())
+        if (maxNumberOfPlayers == 0 && map->GetEntry()->IsWorldMap())
             maxNumberOfPlayers = MAXGROUPSIZE;
         //end npcbot
 
@@ -2343,7 +2296,7 @@ public:
         //
         float inflectionValue  = (float)maxNumberOfPlayers;
 
-        if (instanceMap->IsHeroic())
+        if (map->IsHeroic())
         {
             switch (maxNumberOfPlayers)
             {
@@ -2441,7 +2394,7 @@ public:
             float bossInflectionPointMultiplier;
 
             // Determine the correct boss inflection multiplier
-            if (instanceMap->IsHeroic())
+            if (map->IsHeroic())
             {
                 switch (maxNumberOfPlayers)
                 {
@@ -2525,7 +2478,7 @@ public:
         float statMod_boss_global, statMod_boss_health, statMod_boss_mana, statMod_boss_armor, statMod_boss_damage, statMod_boss_ccDuration;
 
         // Apply the per-instance-type modifiers first
-		if (instanceMap->IsHeroic())
+		if (map->IsHeroic())
 		{
 			switch (maxNumberOfPlayers)
 			{
@@ -3155,7 +3108,7 @@ public:
 
         AutoBalanceMapInfo *mapABInfo=player->GetMap()->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
 
-        if (player->GetMap()->IsDungeon() || player->GetMap()->IsBattleground())
+        if (ShouldMapBeEnabled(player->GetMap()))
         {
             handler->PSendSysMessage("---");
             handler->PSendSysMessage("Map: %s (ID: %u)", player->GetMap()->GetMapName(), player->GetMapId());
@@ -3214,9 +3167,7 @@ public:
         handler->PSendSysMessage("Damage multiplier: %.3f", creatureABInfo->DamageMultiplier);
         handler->PSendSysMessage("CC Duration multiplier: %.3f", creatureABInfo->CCDurationMultiplier);
         handler->PSendSysMessage("XP multiplier: %.3f  Money multiplier: %.3f", creatureABInfo->XPModifier, creatureABInfo->MoneyModifier);
-
         return true;
-
     }
 };
 
@@ -3234,7 +3185,7 @@ public:
         if (GetMapNonGMPlayersCountWithBots(map) < MinPlayerReward)
             return;
 
-        AutoBalanceMapInfo *mapABInfo=map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
+        AutoBalanceMapInfo* mapABInfo = map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
 
         // skip if it's not a pre-wotlk dungeon/raid and if it's not scaled
         if (!LevelScaling || mapABInfo->mapLevel <= 70 || mapABInfo->lfgMinLevel <= 70
@@ -3247,7 +3198,7 @@ public:
         if (playerList.IsEmpty())
             return;
 
-        uint32 reward = map->ToInstanceMap()->GetMaxPlayers() > 5 ? rewardRaid : rewardDungeon;
+        uint32 reward = GetMapMaxPlayers(map) > 5 ? rewardRaid : rewardDungeon;
         if (!reward)
             return;
 

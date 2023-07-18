@@ -2,7 +2,8 @@
 #define MOD_AUTOBALANCE_H
 
 #include "ScriptMgr.h"
-#include "Creature.h"
+
+class Creature;
 
 // Manages registration, loading, and execution of scripts.
 class ABScriptMgr

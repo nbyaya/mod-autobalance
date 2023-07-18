@@ -36,6 +36,8 @@ AutoBalance.Enable.10MHeroic=1
 AutoBalance.Enable.25MHeroic=1
 AutoBalance.Enable.OtherHeroic=1
 
+AutoBalance.Enable.World=0
+
 ##########################
 #
 # Stat Scaling - Inflection Point
