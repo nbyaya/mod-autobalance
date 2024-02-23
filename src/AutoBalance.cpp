@@ -3855,7 +3855,7 @@ class AutoBalance_UnitScript : public UnitScript
         void ModifyPeriodicDamageAurasTick(Unit* target, Unit* source, uint32& amount, SpellInfo const* spellInfo) override
         {
             //npcbot
-            if (source->IsNPCBotOrPet())
+            if (source && source->IsNPCBotOrPet())
                 return;
             //end npcbot
 
@@ -3880,7 +3880,7 @@ class AutoBalance_UnitScript : public UnitScript
         void ModifySpellDamageTaken(Unit* target, Unit* source, int32& amount, SpellInfo const* spellInfo) override
         {
             //npcbot
-            if (source->IsNPCBotOrPet())
+            if (source && source->IsNPCBotOrPet())
                 return;
             //end npcbot
 
@@ -3905,7 +3905,7 @@ class AutoBalance_UnitScript : public UnitScript
         void ModifyMeleeDamage(Unit* target, Unit* source, uint32& amount) override
         {
             //npcbot
-            if (source->IsNPCBotOrPet())
+            if (source && source->IsNPCBotOrPet())
                 return;
             //end npcbot
 
@@ -3928,7 +3928,7 @@ class AutoBalance_UnitScript : public UnitScript
         void ModifyHealReceived(Unit* target, Unit* source, uint32& amount, SpellInfo const* spellInfo) override
         {
             //npcbot
-            if (source->IsNPCBotOrPet())
+            if (source && source->IsNPCBotOrPet())
                 return;
             //end npcbot
 
