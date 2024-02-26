@@ -991,6 +991,8 @@ bool isCreatureRelevant(Creature* creature) {
         return false;
     if (creature->IsNPCBotOrPet())
         return false;
+    if (creature->IsControlledByPlayer())
+        return false;
     //end npcbot
 
     // if this creature isn't assigned to a map, make no changes
@@ -2160,6 +2162,8 @@ void AddCreatureToMapCreatureList(Creature* creature, bool addToCreatureList = t
         return;
     if (creature->IsNPCBotOrPet())
         return;
+    if (creature->IsControlledByPlayer())
+        return;
     //end npcbot
 
     // make sure we have a creature and that it's assigned to a map
@@ -2554,6 +2558,8 @@ void RemoveCreatureFromMapData(Creature* creature)
 {
     //npcbot
     if (creature->IsNPCBotOrPet())
+        return;
+    if (creature->IsControlledByPlayer())
         return;
     //end npcbot
 
@@ -3855,7 +3861,7 @@ class AutoBalance_UnitScript : public UnitScript
         void ModifyPeriodicDamageAurasTick(Unit* target, Unit* source, uint32& amount, SpellInfo const* spellInfo) override
         {
             //npcbot
-            if (source && source->IsNPCBotOrPet())
+            if (source && (source->IsNPCBotOrPet() || source->IsControlledByPlayer()))
                 return;
             //end npcbot
 
@@ -3880,7 +3886,7 @@ class AutoBalance_UnitScript : public UnitScript
         void ModifySpellDamageTaken(Unit* target, Unit* source, int32& amount, SpellInfo const* spellInfo) override
         {
             //npcbot
-            if (source && source->IsNPCBotOrPet())
+            if (source && (source->IsNPCBotOrPet() || source->IsControlledByPlayer()))
                 return;
             //end npcbot
 
@@ -3905,7 +3911,7 @@ class AutoBalance_UnitScript : public UnitScript
         void ModifyMeleeDamage(Unit* target, Unit* source, uint32& amount) override
         {
             //npcbot
-            if (source && source->IsNPCBotOrPet())
+            if (source && (source->IsNPCBotOrPet() || source->IsControlledByPlayer()))
                 return;
             //end npcbot
 
@@ -3928,7 +3934,7 @@ class AutoBalance_UnitScript : public UnitScript
         void ModifyHealReceived(Unit* target, Unit* source, uint32& amount, SpellInfo const* spellInfo) override
         {
             //npcbot
-            if (source && source->IsNPCBotOrPet())
+            if (source && (source->IsNPCBotOrPet() || source->IsControlledByPlayer()))
                 return;
             //end npcbot
 
@@ -3947,7 +3953,7 @@ class AutoBalance_UnitScript : public UnitScript
 
         void OnAuraApply(Unit* unit, Aura* aura) override {
             //npcbot
-            if (aura->GetCaster() && aura->GetCaster()->IsNPCBotOrPet())
+            if (aura->GetCaster() && (aura->GetCaster()->IsNPCBotOrPet() || aura->GetCaster()->IsControlledByPlayer()))
                 return;
             //end npcbot
 
@@ -5223,7 +5229,8 @@ public:
     void OnAllCreatureUpdate(Creature* creature, uint32 /*diff*/) override
     {
         //npcbot
-        if (!creature || !creature->FindMap() || creature->IsNPCBotOrPet())
+        if (!creature || !creature->FindMap() || creature->IsNPCBotOrPet() || creature->IsControlledByPlayer())
+            return;
         //end npcbot
 
         // ensure we're in a dungeon with a creature
@@ -5363,7 +5370,7 @@ public:
             // mana
             if (creature->getPowerType() == POWER_MANA && creature->GetPower(POWER_MANA) >= 0 && creature->GetMaxPower(POWER_MANA) > 0)
             {
-                float currentManaPercent = creature->GetPower(POWER_MANA) / creature->GetMaxPower(POWER_MANA);
+                float currentManaPercent = float(creature->GetPower(POWER_MANA)) / creature->GetMaxPower(POWER_MANA);
                 creature->SetMaxPower(POWER_MANA, origCreatureBaseStats->GenerateMana(creatureTemplate));
                 creature->SetPower(POWER_MANA, creature->GetMaxPower(POWER_MANA) * currentManaPercent);
             }
@@ -5396,7 +5403,7 @@ public:
     void ModifyCreatureAttributes(Creature* creature)
     {
         //npcbot
-        if (!creature || !creature->FindMap() || creature->IsNPCBotOrPet())
+        if (!creature || !creature->FindMap() || creature->IsNPCBotOrPet() || creature->IsControlledByPlayer())
             return;
         //end npcbot
 
