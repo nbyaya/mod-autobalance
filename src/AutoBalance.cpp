@@ -4792,7 +4792,7 @@ class AutoBalance_AllMapScript : public AllMapScript
                                 {
                                     chatHandle.PSendSysMessage(ABGetLocaleText(locale, "welcome_to_player").c_str(),
                                         map->GetMapName(),
-                                        instanceMap->GetMaxPlayers(),
+                                        GetMapMaxPlayers(map),
                                         instanceDifficulty.c_str(),
                                         mapABInfo->playerCount,
                                         mapABInfo->adjustedPlayerCount);
