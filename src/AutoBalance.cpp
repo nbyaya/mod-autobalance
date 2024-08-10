@@ -5120,8 +5120,8 @@ public:
                 if (mapABInfo->enabled && PlayerChangeNotify && EnableGlobal) {
                     for (MapReference const& ref : creatureMap->GetPlayers()) {
                         if (Player const* playerHandle = ref.GetSource()) {
-                            ChatHandler(playerHandle->GetSession()).PSendSysMessage("|cffFF0000 [AutoBalance+NPCBots]|r|cffFF8000 %s (bot) entered %s. Auto setting player count to %i (Player Difficulty Offset = %i) |r",
-                                creature->GetName().c_str(), creatureMap->GetMapName(), mapABInfo->playerCount + PlayerCountDifficultyOffset, PlayerCountDifficultyOffset);
+                            ChatHandler(playerHandle->GetSession()).PSendSysMessage("|cffFF0000 [AutoBalance+NPCBots]|r|cffFF8000 {} (bot) entered {}. Auto setting player count to {} (Player Difficulty Offset = {}) |r",
+                                creature->GetName(), creatureMap->GetMapName(), mapABInfo->playerCount + PlayerCountDifficultyOffset, PlayerCountDifficultyOffset);
                         }
                     }
                 }
@@ -5201,8 +5201,8 @@ public:
                     if (mapABInfo->enabled && PlayerChangeNotify && EnableGlobal) {
                         for (MapReference const& ref : map->GetPlayers()) {
                             if (Player const* playerHandle = ref.GetSource()) {
-                                ChatHandler(playerHandle->GetSession()).PSendSysMessage("|cffFF0000 [AutoBalance+NPCBots]|r|cffFF8000 %s (bot) left %s. Auto setting player count to %i (Player Difficulty Offset = %i) |r",
-                                    creature->GetName().c_str(), map->GetMapName(), mapABInfo->playerCount + PlayerCountDifficultyOffset, PlayerCountDifficultyOffset);
+                                ChatHandler(playerHandle->GetSession()).PSendSysMessage("|cffFF0000 [AutoBalance+NPCBots]|r|cffFF8000 {} (bot) left {}. Auto setting player count to {} (Player Difficulty Offset = {}) |r",
+                                    creature->GetName(), map->GetMapName(), mapABInfo->playerCount + PlayerCountDifficultyOffset, PlayerCountDifficultyOffset);
                             }
                         }
                     }
