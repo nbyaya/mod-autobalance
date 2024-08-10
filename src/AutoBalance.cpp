@@ -818,7 +818,17 @@ bool ShouldMapBeEnabled(Map* map)
     //npcbot
     else if (map->GetEntry()->IsWorldMap())
     {
-        return EnableWorld;
+        if (!EnableGlobal)
+        {
+            LOG_DEBUG("module.AutoBalance", "AutoBalance::ShouldMapBeEnabled: World map {} ({}) - Not enabled because EnableGlobal is false", map->GetMapName(), map->GetId());
+            return false;
+        }
+        if (!EnableWorld)
+        {
+            LOG_DEBUG("module.AutoBalance", "AutoBalance::ShouldMapBeEnabled: World map {} ({}) - Not enabled because EnableWorld is false", map->GetMapName(), map->GetId());
+            return false;
+        }
+        return true;
     }
     //end npcbot
     else
