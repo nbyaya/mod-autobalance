@@ -6725,7 +6725,7 @@ public:
         {
             handler->PSendSysMessage("---");
             // Map basics
-            handler->PSendSysMessage("%s (%u-player %s) | ID %u-%u%s",
+            handler->PSendSysMessage("{} ({}-player {}) | ID {}-{}{}",
                                     player->GetMap()->GetMapName(),
                                     GetMapMaxPlayers(player->GetMap()),
                                     player->GetMap()->ToInstanceMap() && player->GetMap()->ToInstanceMap()->IsHeroic() ? "Heroic" : "Normal",
@@ -6737,7 +6737,7 @@ public:
             // if (!mapABInfo->enabled) { return true; }
 
             // Player stats
-            handler->PSendSysMessage("Players on map: %u (Lvl %u - %u)",
+            handler->PSendSysMessage("Players on map: {} (Lvl {} - {})",
                                     mapABInfo->playerCount,
                                     mapABInfo->lowestPlayerLevel,
                                     mapABInfo->highestPlayerLevel
@@ -6834,7 +6834,7 @@ public:
         AutoBalanceCreatureInfo *targetABInfo=target->CustomData.GetDefault<AutoBalanceCreatureInfo>("AutoBalanceCreatureInfo");
 
         handler->PSendSysMessage("---");
-        handler->PSendSysMessage("%s (%u%s%s), %s",
+        handler->PSendSysMessage("{} ({}{}{}), {}",
                                   target->GetName(),
                                   targetABInfo->UnmodifiedLevel,
                                   isCreatureRelevant(target) && targetABInfo->UnmodifiedLevel != target->GetLevel() ? "->" + std::to_string(targetABInfo->selectedLevel) : "",
