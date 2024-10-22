@@ -4755,7 +4755,7 @@ class AutoBalance_AllMapScript : public AllMapScript
             LocaleConstant locale = session->GetSessionDbLocaleIndex();
 
             // if the previous player count is the same as the new player count, update without force
-            if (prevAdjustedPlayerCount == mapABInfo->adjustedPlayerCount)
+            if ((prevAdjustedPlayerCount == mapABInfo->adjustedPlayerCount) && (mapABInfo->adjustedPlayerCount != 1))
             {
                 LOG_DEBUG("module.AutoBalance", "AutoBalance_AllMapScript::OnPlayerEnterAll: Player difficulty unchanged at {}. Updating map data (no force).",
                     mapABInfo->adjustedPlayerCount
@@ -6725,7 +6725,7 @@ public:
         {
             handler->PSendSysMessage("---");
             // Map basics
-            handler->PSendSysMessage("%s (%u-player %s) | ID %u-%u%s",
+            handler->PSendSysMessage("{} ({}-player {}) | ID {}-{}{}",
                                     player->GetMap()->GetMapName(),
                                     GetMapMaxPlayers(player->GetMap()),
                                     player->GetMap()->ToInstanceMap() && player->GetMap()->ToInstanceMap()->IsHeroic() ? "Heroic" : "Normal",
@@ -6737,7 +6737,7 @@ public:
             // if (!mapABInfo->enabled) { return true; }
 
             // Player stats
-            handler->PSendSysMessage("Players on map: %u (Lvl %u - %u)",
+            handler->PSendSysMessage("Players on map: {} (Lvl {} - {})",
                                     mapABInfo->playerCount,
                                     mapABInfo->lowestPlayerLevel,
                                     mapABInfo->highestPlayerLevel
@@ -6807,7 +6807,7 @@ public:
         }
         //else
         //{
-        //    handler->PSendSysMessage("This command can only be used in a dungeon or raid.");
+        //    handler->PSendSysMessage(ABGetLocaleText(locale, "ab_command_only_in_instance").c_str());
         //    return false;
         //}
     }
@@ -6826,7 +6826,7 @@ public:
         }
         //else if (!target->GetMap()->IsDungeon())
         //{
-        //    handler->PSendSysMessage("That target is not in an instance.");
+        //    handler->PSendSysMessage(ABGetLocaleText(locale, "target_no_in_instance").c_str());
         //    handler->SetSentErrorMessage(true);
         //    return false;
         //}
@@ -6834,7 +6834,7 @@ public:
         AutoBalanceCreatureInfo *targetABInfo=target->CustomData.GetDefault<AutoBalanceCreatureInfo>("AutoBalanceCreatureInfo");
 
         handler->PSendSysMessage("---");
-        handler->PSendSysMessage("%s (%u%s%s), %s",
+        handler->PSendSysMessage("{} ({}{}{}), {}",
                                   target->GetName(),
                                   targetABInfo->UnmodifiedLevel,
                                   isCreatureRelevant(target) && targetABInfo->UnmodifiedLevel != target->GetLevel() ? "->" + std::to_string(targetABInfo->selectedLevel) : "",
