@@ -6807,7 +6807,7 @@ public:
         }
         //else
         //{
-        //    handler->PSendSysMessage("This command can only be used in a dungeon or raid.");
+        //    handler->PSendSysMessage(ABGetLocaleText(locale, "ab_command_only_in_instance").c_str());
         //    return false;
         //}
     }
@@ -6826,7 +6826,7 @@ public:
         }
         //else if (!target->GetMap()->IsDungeon())
         //{
-        //    handler->PSendSysMessage("That target is not in an instance.");
+        //    handler->PSendSysMessage(ABGetLocaleText(locale, "target_no_in_instance").c_str());
         //    handler->SetSentErrorMessage(true);
         //    return false;
         //}
