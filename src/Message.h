@@ -1,9 +1,10 @@
 // Message.h
 #ifndef AB_MESSAGE_H
 #define AB_MESSAGE_H
-#include <Common.h>
+#include "Common.h"
 #include "ItemTemplate.h"
 #include <string>
+#include <unordered_map>
 
 std::string ABGetLocaleText(LocaleConstant locale, const std::string& titleType);
 

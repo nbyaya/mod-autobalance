@@ -57,6 +57,7 @@
  #error "NPCBots mod is not installed! This version of Autobalance only supports AzerothCore+NPCBots."
 #endif
 #include "botmgr.h"
+#include "Tokenize.h"
 //end npcbot
 
 using namespace Acore::ChatCommands;
@@ -344,6 +345,10 @@ static std::map<uint32, AutoBalanceStatModifiers> statModifierBossOverrides;
 static std::map<uint32, AutoBalanceStatModifiers> statModifierCreatureOverrides;
 static std::map<uint8, AutoBalanceLevelScalingDynamicLevelSettings> levelScalingDynamicLevelOverrides;
 static std::map<uint32, uint32> levelScalingDistanceCheckOverrides;
+//npcbot
+static std::map<uint32, float> npcBotDamageTakenByCreatureIdOverrides;
+static std::map<uint32, float> npcBotDamageTakenBySpellIdOverrides;
+//end npcbot
 
 static int8 PlayerCountDifficultyOffset;
 static bool LevelScaling;
@@ -582,7 +587,60 @@ std::map<uint32, uint32> LoadDistanceCheckOverrides(std::string dungeonIdString)
 }
 
 //npcbot
-uint32 GetMapNonGMPlayersCountWithBots(Map const* map)
+template<typename K, typename V>
+static void LoadNpcBotOverrides2(std::map<K, V>& storage, std::string&& overrides_str, std::string_view context)
+{
+    storage.clear(); //reload
+    std::vector<std::string_view> tokens_2 = Acore::Tokenize(overrides_str, ',', false);
+    for (std::string_view tok2 : tokens_2)
+    {
+        std::vector<std::string_view> tokpair = Acore::Tokenize(tok2, ' ', false);
+        ASSERT(tokpair.size() == 2u, "Unable to parse config param '{}' (extracted from '{}') during '{}'! Please fix your config and try again", tok2, overrides_str, context);
+        Optional<K> val1 = Acore::StringTo<K>(tokpair[0]);
+        Optional<V> val2 = Acore::StringTo<V>(tokpair[1]);
+        ASSERT(val1, "Unable to parse config param '{}'[0] (extracted from '{}') during '{}'! Please fix your config and try again", tok2, overrides_str, context);
+        ASSERT(val2, "Unable to parse config param '{}'[1] (extracted from '{}') during '{}'! Please fix your config and try again", tok2, overrides_str, context);
+        storage[*val1] = *val2;
+    }
+}
+
+static void LoadNpcBotDamageTakenByCreatureIdOverrides(std::string&& overrides_str, std::string_view context)
+{
+    auto& storage = npcBotDamageTakenByCreatureIdOverrides;
+    LoadNpcBotOverrides2(storage, std::move(overrides_str), context);
+    std::vector<uint32> invalid_ids;
+    invalid_ids.reserve(storage.size());
+    for (auto const& p : storage)
+    {
+        if (p.second <= 0.0f)
+        {
+            LOG_ERROR("server.loading", "LoadNpcBotDamageTakenByCreatureIdOverrides(): invalid value {} for creature {}, ignored!", p.second, p.first);
+            invalid_ids.push_back(p.first);
+        }
+    }
+    for (uint32 invalid_id : invalid_ids)
+        storage.erase(invalid_id);
+}
+
+static void LoadNpcBotDamageTakenBySpellIdOverrides(std::string&& overrides_str, std::string_view context)
+{
+    auto& storage = npcBotDamageTakenBySpellIdOverrides;
+    LoadNpcBotOverrides2(storage, std::move(overrides_str), context);
+    std::vector<uint32> invalid_ids;
+    invalid_ids.reserve(storage.size());
+    for (auto const& p : storage)
+    {
+        if (p.second <= 0.0f)
+        {
+            LOG_ERROR("server.loading", "LoadNpcBotDamageTakenBySpellIdOverrides(): invalid value {} for spellId {}, ignored!", p.second, p.first);
+            invalid_ids.push_back(p.first);
+        }
+    }
+    for (uint32 invalid_id : invalid_ids)
+        storage.erase(invalid_id);
+}
+
+static uint32 GetMapNonGMPlayersCountWithBots(Map const* map)
 {
     uint32 count = 0;
     bool limitBots = BotMgr::LimitBots(map);
@@ -603,14 +661,14 @@ uint32 GetMapNonGMPlayersCountWithBots(Map const* map)
     return count;
 }
 
-uint32 GetMapMaxPlayers(Map const* map)
+static uint32 GetMapMaxPlayers(Map const* map)
 {
     if (InstanceMap const* imap = map->ToInstanceMap())
         return imap->GetMaxPlayers();
     return MAXGROUPSIZE;
 }
 
-float HealthModForRank(uint32 rank)
+static float HealthModForRank(uint32 rank)
 {
     switch (rank)
     {
@@ -3266,6 +3324,8 @@ class AutoBalance_WorldScript : public WorldScript
         //npcbot
         CountNpcBots = sConfigMgr->GetOption<bool>("AutoBalance.CountNpcBots", true);
         EnableWorld = sConfigMgr->GetOption<bool>("AutoBalance.Enable.World", false);
+        LoadNpcBotDamageTakenByCreatureIdOverrides(sConfigMgr->GetOption<std::string>("AutoBalance.NpcBot.DamageTaken.PerCreature", "", true), "AutoBalance.NpcBot.DamageTaken.PerCreature");
+        LoadNpcBotDamageTakenBySpellIdOverrides(sConfigMgr->GetOption<std::string>("AutoBalance.NpcBot.DamageTaken.PerSpellId", "", true), "AutoBalance.NpcBot.DamageTaken.PerSpellId");
         //end npcbot
 
         // Misc Settings
@@ -4329,6 +4389,30 @@ class AutoBalance_UnitScript : public UnitScript
                     }
                 }
             }
+
+            //npcbot
+            if (source->IsCreature() && target->IsNPCBotOrPet())
+            {
+                if (npcBotDamageTakenByCreatureIdOverrides.find(source->GetEntry()) != npcBotDamageTakenByCreatureIdOverrides.cend())
+                {
+                    damageMultiplier *= npcBotDamageTakenByCreatureIdOverrides.at(source->GetEntry());
+                    if (_debug_damage_and_healing)
+                    {
+                        LOG_DEBUG("module.AutoBalance_DamageHealingCC", "AutoBalance_UnitScript::_Modify_Damage_Healing: Using npcbot damagetaken override for creature {} '{}', now {}",
+                            source->GetEntry(), source->GetName(), damageMultiplier);
+                    }
+                }
+                if (spellInfo && npcBotDamageTakenBySpellIdOverrides.find(spellInfo->Id) != npcBotDamageTakenBySpellIdOverrides.cend())
+                {
+                    damageMultiplier *= npcBotDamageTakenBySpellIdOverrides.at(spellInfo->Id);
+                    if (_debug_damage_and_healing)
+                    {
+                        LOG_DEBUG("module.AutoBalance_DamageHealingCC", "AutoBalance_UnitScript::_Modify_Damage_Healing: Using npcbot damagetaken override for spellId {}, now {}",
+                            spellInfo->Id, damageMultiplier);
+                    }
+                }
+            }
+            //end npcbot
 
             // we are good to go, return the original damage times the multiplier
             if (_debug_damage_and_healing)
